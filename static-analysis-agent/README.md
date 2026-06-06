@@ -2,6 +2,9 @@
 
 基于 ReAct 架构，使用 LLM 编排 radare2 与 Ghidra 工具，对黑盒 ELF 二进制进行静态安全分析。
 
+- **模型**：Claude (Anthropic)
+- **日期**：2026-06-06
+
 ## 项目结构
 
 ```
