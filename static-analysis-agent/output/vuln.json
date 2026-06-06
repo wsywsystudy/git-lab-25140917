@@ -1,0 +1,5 @@
+{
+  "vuln_type": "stack_buffer_overflow",
+  "location": "main (0x401264), __strcpy_chk at 0x401382",
+  "cause": "用户输入通过 fgets 读入 128 字节栈缓冲区，经长度校验（<=99 字节）后，由 __strcpy_chk 复制到仅 16 字节的栈缓冲区，溢出可覆盖返回地址。"
+}
