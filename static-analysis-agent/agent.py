@@ -22,7 +22,7 @@ import tools
 # ============================================================
 API_KEY = os.environ.get("OPENAI_API_KEY", "")
 BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-MODEL = os.environ.get("LLM_MODEL", "gpt-4o")
+MODEL = os.environ.get("LLM_MODEL", "mimo-v2.5-pro[1m]")
 
 # ============================================================
 # 工具定义（OpenAI Function Calling 格式）
