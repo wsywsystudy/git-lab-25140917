@@ -200,7 +200,7 @@ def solve_input(state_index: int = 0) -> dict:
 
 
 def get_project_info() -> dict:
-    """返回当前项目的基本信息，包括通过 CFG 分析得到的函数地址。"""
+    """返回当前项目的基本信息，包括通过 CFG 分析得到的函数地址和关键提示。"""
     if _project is None:
         return {"error": "Project not initialized."}
 
@@ -215,12 +215,210 @@ def get_project_info() -> dict:
         cfg = _project.analyses.CFGFast()
         funcs = []
         for func in cfg.kb.functions.values():
-            funcs.append({"addr": hex(func.addr), "name": func.name})
-            # 识别已知函数名
+            funcs.append({"addr": hex(func.addr), "name": func.name, "size": func.size})
             if func.name in ("main", "check_password", "gadget_trap"):
                 info[f"{func.name}_addr"] = hex(func.addr)
-        info["all_functions"] = funcs[:30]  # 限制输出数量
+        info["all_functions"] = funcs[:30]
     except Exception as e:
         info["cfg_error"] = str(e)
+
+    # 自动检测死循环和字符串引用，提供 hints
+    hints = []
+    try:
+        cfg = _project.analyses.CFGFast()
+        for func in cfg.kb.functions.values():
+            if func.addr >= 0x600000:
+                continue
+            for block in func.blocks:
+                for insn in block.capstone.insns:
+                    if insn.mnemonic == 'jmp':
+                        for op in insn.operands:
+                            target = None
+                            if op.type == 2:
+                                target = op.imm
+                            elif op.type == 3:
+                                target = op.mem.disp + insn.address + insn.size
+                            if target == insn.address:
+                                hints.append(
+                                    f"检测到死循环: jmp {hex(insn.address)} (在函数 {hex(func.addr)} 内)，"
+                                    f"应将 {hex(insn.address)} 加入 avoid_addrs"
+                                )
+    except Exception:
+        pass
+
+    # 字符串扫描提示
+    try:
+        success_addr = _find_string_addr(_project.filename, "Success")
+        if success_addr:
+            hints.append(
+                f"'Success' 字符串地址: {hex(success_addr)}。"
+                f"使用 find_string_xrefs('Success') 可找到引用此字符串的代码地址。"
+            )
+    except Exception:
+        pass
+
+    info["hints"] = hints
+    return info
+
+
+def find_string_xrefs(string_name: str) -> dict:
+    """查找引用指定字符串的代码地址。用于确定 find_addrs 参数。"""
+    if _project is None:
+        return {"error": "Project not initialized."}
+
+    # 查找字符串地址
+    str_addr = _find_string_addr(_project.filename, string_name)
+    if not str_addr:
+        return {"error": f"String '{string_name}' not found in binary."}
+
+    result = {
+        "string": string_name,
+        "string_addr": hex(str_addr),
+        "references": [],
+    }
+
+    # 通过 CFG 查找引用该地址的指令
+    try:
+        cfg = _project.analyses.CFGFast()
+        for func in cfg.kb.functions.values():
+            if func.addr >= 0x600000:
+                continue
+            for block in func.blocks:
+                ref_insn = None
+                for insn in block.capstone.insns:
+                    # 检查 lea/cmp/mov 指令是否引用了字符串地址
+                    for op in insn.operands:
+                        target = None
+                        if op.type == 2:  # immediate
+                            target = op.imm
+                        elif op.type == 3:  # memory
+                            target = op.mem.disp + insn.address + insn.size
+                        if target == str_addr:
+                            ref_insn = insn
+                # 在同一基本块中找引用后的 call 指令
+                if ref_insn:
+                    puts_call = None
+                    for insn in block.capstone.insns:
+                        if insn.address > ref_insn.address and insn.mnemonic == 'call':
+                            puts_call = hex(insn.address)
+                            break
+                    result["references"].append({
+                        "insn_addr": hex(ref_insn.address),
+                        "insn": f"{ref_insn.mnemonic} {ref_insn.op_str}",
+                        "func": hex(func.addr),
+                        "next_call": puts_call,
+                    })
+    except Exception as e:
+        result["error"] = str(e)
+
+    # 提供建议
+    if result["references"]:
+        ref = result["references"][0]
+        if ref.get("next_call"):
+            result["suggested_find_addrs"] = ref["next_call"]
+            result["suggestion"] = (
+                f"字符串 '{string_name}' 在 {ref['insn_addr']} 被引用，"
+                f"后续的 call 指令在 {ref['next_call']}。"
+                f"建议将 {ref['next_call']} 作为 explore_step 的 find_addrs 参数。"
+            )
+
+    return result
+    """返回当前项目的基本信息，包括函数地址、字符串引用分析和关键地址提示。"""
+    if _project is None:
+        return {"error": "Project not initialized."}
+
+    info = {
+        "binary_path": _project.filename,
+        "arch": str(_project.arch),
+        "entry": hex(_project.entry),
+    }
+
+    # CFG 分析获取函数地址
+    try:
+        cfg = _project.analyses.CFGFast()
+        funcs = []
+        for func in cfg.kb.functions.values():
+            funcs.append({"addr": hex(func.addr), "name": func.name, "size": func.size})
+            if func.name in ("main", "check_password", "gadget_trap"):
+                info[f"{func.name}_addr"] = hex(func.addr)
+        info["all_functions"] = funcs[:30]
+    except Exception as e:
+        info["cfg_error"] = str(e)
+
+    # 分析每个函数的反汇编，识别关键指令
+    analysis = {}
+    try:
+        cfg = _project.analyses.CFGFast()
+        for func in cfg.kb.functions.values():
+            if func.addr >= 0x600000:
+                continue
+            func_info = {"addr": hex(func.addr), "calls": [], "string_refs": [], "has_dead_loop": False}
+            for block in func.blocks:
+                for insn in block.capstone.insns:
+                    # 检测 call 指令
+                    if insn.mnemonic == 'call':
+                        call_target = insn.operands[0].imm if insn.operands else None
+                        if call_target:
+                            func_info["calls"].append(hex(call_target))
+                    # 检测死循环 (jmp 到自身)
+                    if insn.mnemonic == 'jmp':
+                        for op in insn.operands:
+                            if op.type == 3:  # memory
+                                target = op.mem.disp + insn.address + insn.size
+                                if target == insn.address:
+                                    func_info["has_dead_loop"] = True
+                                    func_info["dead_loop_addr"] = hex(insn.address)
+            # 检查函数是否引用了 "Success" 字符串
+            try:
+                func_bytes = _project.loader.memory.load(func.addr, func.size)
+                if b'Success' in func_bytes:
+                    func_info["references_success_string"] = True
+            except Exception:
+                pass
+            analysis[hex(func.addr)] = func_info
+    except Exception:
+        pass
+
+    info["function_analysis"] = analysis
+
+    # 分析关键指令模式，提供建议
+    hints = []
+    try:
+        cfg = _project.analyses.CFGFast()
+        for func in cfg.kb.functions.values():
+            if func.addr >= 0x600000:
+                continue
+            for block in func.blocks:
+                for insn in block.capstone.insns:
+                    # 检测 jmp 到自身（死循环）
+                    if insn.mnemonic == 'jmp':
+                        for op in insn.operands:
+                            target = None
+                            if op.type == 2:  # immediate
+                                target = op.imm
+                            elif op.type == 3:  # memory operand
+                                target = op.mem.disp + insn.address + insn.size
+                            if target == insn.address:
+                                hints.append(
+                                    f"检测到死循环: jmp {hex(insn.address)} (在函数 {hex(func.addr)} 内)，"
+                                    f"应将 {hex(insn.address)} 加入 avoid_addrs"
+                                )
+    except Exception:
+        pass
+
+    # 如果自动检测失败，提供基于字符串扫描的提示
+    if not hints:
+        try:
+            success_addr = _find_string_addr(_project.filename, "Success")
+            if success_addr:
+                hints.append(
+                    f"'Success' 字符串地址: {hex(success_addr)}。"
+                    f"需要找到引用此地址的代码位置作为 find_addrs。"
+                    f"建议使用 explore_step 的 find_addrs 参数指定目标代码地址。"
+                )
+        except Exception:
+            pass
+
+    info["hints"] = hints
 
     return info

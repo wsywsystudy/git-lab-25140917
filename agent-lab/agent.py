@@ -94,6 +94,27 @@ TOOLS_SPEC = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_string_xrefs",
+            "description": (
+                "查找引用指定字符串的代码地址。"
+                "例如 find_string_xrefs('Success') 会返回引用 'Success' 字符串的指令地址，"
+                "以及后续的 call 指令地址，可直接用作 explore_step 的 find_addrs 参数。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "string_name": {
+                        "type": "string",
+                        "description": "要查找的字符串，如 'Success'",
+                    }
+                },
+                "required": ["string_name"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """\
@@ -123,6 +144,7 @@ def dispatch_tool(tool_name: str, arguments: dict) -> str:
         "explore_step": tools.explore_step,
         "solve_input": tools.solve_input,
         "get_project_info": tools.get_project_info,
+        "find_string_xrefs": tools.find_string_xrefs,
     }
     if tool_name not in func_map:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
