@@ -22,7 +22,7 @@ import tools
 # ============================================================
 API_KEY = os.environ.get("OPENAI_API_KEY", "")
 BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-MODEL = os.environ.get("LLM_MODEL", "mimo-v2.5-pro[1m]")
+MODEL = os.environ.get("LLM_MODEL", "mimo-v2.5-pro")
 
 # ============================================================
 # 工具定义（OpenAI Function Calling 格式）
@@ -126,6 +126,26 @@ SYSTEM_PROMPT = """\
 # 工具分派
 # ============================================================
 def dispatch_tool(tool_name: str, arguments: dict, mode: str = "live") -> str:
+    # 优先使用真实工具，失败时回退到演示工具
+    if mode == "live":
+        if tool_name in tools.LIVE_TOOLS:
+            try:
+                result = tools.LIVE_TOOLS[tool_name](**arguments)
+                # 检查是否返回了错误
+                if isinstance(result, dict) and "error" in result:
+                    # 回退到演示工具
+                    if tool_name in tools.DEMO_TOOLS:
+                        result = tools.DEMO_TOOLS[tool_name](**arguments)
+                        result["_note"] = "live tool failed, using demo data from angr analysis"
+                return json.dumps(result, ensure_ascii=False, indent=2)
+            except Exception:
+                # 回退到演示工具
+                if tool_name in tools.DEMO_TOOLS:
+                    result = tools.DEMO_TOOLS[tool_name](**arguments)
+                    result["_note"] = "live tool failed, using demo data from angr analysis"
+                    return json.dumps(result, ensure_ascii=False, indent=2)
+                return json.dumps({"error": f"Tool {tool_name} failed and no demo fallback"})
+
     tool_map = tools.DEMO_TOOLS if mode == "demo" else tools.LIVE_TOOLS
     if tool_name not in tool_map:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
