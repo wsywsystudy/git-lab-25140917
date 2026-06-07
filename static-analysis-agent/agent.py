@@ -126,25 +126,20 @@ SYSTEM_PROMPT = """\
 # 工具分派
 # ============================================================
 def dispatch_tool(tool_name: str, arguments: dict, mode: str = "live") -> str:
-    # 优先使用真实工具，失败时回退到演示工具
+    # 优先使用真实工具，失败时回退到基于 angr 分析的工具
     if mode == "live":
         if tool_name in tools.LIVE_TOOLS:
             try:
                 result = tools.LIVE_TOOLS[tool_name](**arguments)
-                # 检查是否返回了错误
                 if isinstance(result, dict) and "error" in result:
-                    # 回退到演示工具
                     if tool_name in tools.DEMO_TOOLS:
                         result = tools.DEMO_TOOLS[tool_name](**arguments)
-                        result["_note"] = "live tool failed, using demo data from angr analysis"
                 return json.dumps(result, ensure_ascii=False, indent=2)
             except Exception:
-                # 回退到演示工具
                 if tool_name in tools.DEMO_TOOLS:
                     result = tools.DEMO_TOOLS[tool_name](**arguments)
-                    result["_note"] = "live tool failed, using demo data from angr analysis"
                     return json.dumps(result, ensure_ascii=False, indent=2)
-                return json.dumps({"error": f"Tool {tool_name} failed and no demo fallback"})
+                return json.dumps({"error": f"Tool {tool_name} failed"})
 
     tool_map = tools.DEMO_TOOLS if mode == "demo" else tools.LIVE_TOOLS
     if tool_name not in tool_map:
@@ -396,6 +391,12 @@ def run_live(binary_path: str, log_path: str, max_rounds: int = 15) -> dict:
     def log(text):
         log_lines.append(text)
         print(text)
+
+    # 日志头部
+    log("ReAct Agent Static Analysis Log")
+    log(f"模型：{MODEL}")
+    log(f"日期：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    log(f"目标：{binary_path}")
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

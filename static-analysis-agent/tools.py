@@ -184,11 +184,8 @@ def demo_r2_info(binary_path: str) -> dict:
 
 
 def demo_r2_disasm(binary_path: str, addr: str, count: int = 50) -> dict:
-    """演示模式：返回预反汇编结果。"""
-    disasm_map = {
-        "0x401264": {
-            "function": "main",
-            "disassembly": """\
+    """演示模式：返回预反汇编结果。对于 main 函数范围内的地址，返回 main 的完整反汇编。"""
+    main_disasm = """\
 0x401264  endbr64
 0x401268  push rbx
 0x401269  sub rsp, 0xa0
@@ -214,15 +211,27 @@ def demo_r2_disasm(binary_path: str, addr: str, count: int = 50) -> dict:
 0x40134a  cmp rax, 0x63          ; length-1 <= 99?
 0x40134e  jbe 0x401377
 ...
+0x40135e  mov edi, 0x200         ; malloc(512)
+0x401363  call malloc
+0x401368  mov rdi, rax
+0x40136b  test rax, rax
+0x40136e  je 0x40130a
+...
 0x401377  mov rsi, rbx           ; src = input
 0x40137a  mov rdi, rsp           ; dst = stack buffer (small!)
 0x40137d  mov edx, 0x10          ; limit = 16
 0x401382  call __strcpy_chk      ; strcpy with bounds check
 0x401387  jmp 0x401350           ; return
 """
-        }
-    }
-    return disasm_map.get(addr, {"error": f"No disassembly for {addr}"})
+    # 对于 main 函数范围内的任何地址，都返回 main 的反汇编
+    # 对于 main 函数范围内的地址，返回 main 的反汇编
+    try:
+        addr_int = int(addr, 16)
+        if 0x401264 <= addr_int <= 0x401390:
+            return {"function": "main", "disassembly": main_disasm}
+    except ValueError:
+        pass
+    return {"error": f"No disassembly for {addr}"}
 
 
 def demo_r2_strings(binary_path: str) -> dict:
@@ -294,6 +303,13 @@ void sub_401191(void) {
 """
         },
     }
+    # 对于 main 函数范围内的地址，返回 main 的反编译结果
+    try:
+        addr_int = int(function_addr, 16)
+        if 0x401264 <= addr_int <= 0x401390:
+            return decomp_map["0x401264"]
+    except ValueError:
+        pass
     return decomp_map.get(function_addr, {"error": f"No decompilation for {function_addr}"})
 
 

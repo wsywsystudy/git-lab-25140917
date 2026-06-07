@@ -1,5 +1,5 @@
 {
-  "vuln_type": "stack_buffer_overflow",
-  "location": "main (0x401264), __strcpy_chk call at 0x401382",
-  "cause": "fgets reads up to 128 bytes, length check permits 1-100 bytes, but __strcpy_chk copies user input into a 16-byte stack buffer at rsp, overflowing saved registers and return address"
+  "vuln_type": "Stack Buffer Overflow",
+  "location": "main (0x401264) → __strcpy_chk at 0x401382",
+  "cause": "User-controlled input from fgets (up to 100 chars after length check at 0x40134a) is copied via __strcpy_chk into a 16-byte stack buffer (local_10 at rsp), with only the destlen=0x10 runtime guard; additionally __snprintf_chk is called with an incorrect buffer size (0xa0 vs actual 16 bytes), bypassing FORTIFY_SOURCE protections."
 }
